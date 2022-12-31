@@ -120,6 +120,8 @@ mod tests {
     #[test]
     fn test_consecutive_cpu_usage_update() {
         use crate::{PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         use std::time::Duration;
 
         if !System::IS_SUPPORTED {
@@ -130,6 +132,15 @@ mod tests {
         sys.refresh_processes_specifics(ProcessRefreshKind::new().with_cpu());
         sys.refresh_cpu();
         assert!(!sys.cpus().is_empty());
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_c = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop_c.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+
         let mut pids = sys
             .processes()
             .iter()
@@ -144,8 +155,12 @@ mod tests {
             for pid in &pids {
                 sys.refresh_process_specifics(*pid, ProcessRefreshKind::new().with_cpu());
             }
+            // To ensure that linux doesn't give too high numbers.
             assert!(sys.process(pids[2]).unwrap().cpu_usage() < sys.cpus().len() as f32 * 100.);
+            // To ensure it's not 0 either.
+            assert!(sys.process(pids[2]).unwrap().cpu_usage() > 0.);
             std::thread::sleep(Duration::from_millis(500));
         }
+        stop.store(false, Ordering::Relaxed);
     }
 }
